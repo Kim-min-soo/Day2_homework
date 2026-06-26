@@ -4,7 +4,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import requests
 import io
-from datetime import date, timedelta
+from datetime import date
 import random
 
 # ─────────────────────────────────────────────
@@ -39,44 +39,6 @@ def parse_yt(file) -> pd.DataFrame:
     df["날짜"] = pd.to_datetime(df["날짜"])
     return df
 
-# ─────────────────────────────────────────────
-# 더미 데이터 생성 함수 (파일 미업로드 시 폴백)
-# ─────────────────────────────────────────────
-@st.cache_data
-def dummy_ott() -> pd.DataFrame:
-    random.seed(42)
-    today = date.today()
-    days = [today - timedelta(days=i) for i in range(13, -1, -1)]
-    platforms = ["넷플릭스", "TVING", "쿠팡플레이"]
-    contents = {
-        "넷플릭스":   ["오징어게임", "지금 우리 학교는", "더 글로리", "종이의 집"],
-        "TVING":      ["환승연애3", "피식대학", "술꾼도시여자들", "유미의 세포들"],
-        "쿠팡플레이": ["SNL코리아", "안나", "경이로운 소문", "하이퍼나이프"],
-    }
-    rows = []
-    for d in days:
-        for _ in range(random.randint(1, 3)):
-            p = random.choice(platforms)
-            rows.append({"날짜": d, "플랫폼": p, "콘텐츠명": random.choice(contents[p]), "시청시간(분)": random.randint(20, 120)})
-    df = pd.DataFrame(rows)
-    df["날짜"] = pd.to_datetime(df["날짜"])
-    return df
-
-@st.cache_data
-def dummy_yt() -> pd.DataFrame:
-    random.seed(42)
-    today = date.today()
-    days = [today - timedelta(days=i) for i in range(13, -1, -1)]
-    channels = ["침착맨", "쏘영", "안될공학", "워크맨", "달라스튜디오", "빠니보틀"]
-    rows = []
-    for d in days:
-        for _ in range(random.randint(2, 5)):
-            kind = random.choice(["숏폼", "롱폼"])
-            rows.append({"날짜": d, "채널명": random.choice(channels), "영상종류": kind,
-                         "시청시간(분)": random.randint(1, 15) if kind == "숏폼" else random.randint(10, 60)})
-    df = pd.DataFrame(rows)
-    df["날짜"] = pd.to_datetime(df["날짜"])
-    return df
 
 # ─────────────────────────────────────────────
 # 사이드바 — 파일 업로드 + 세부 필터
@@ -86,7 +48,7 @@ with st.sidebar:
 
     # ① 파일 선택
     st.markdown("**📂 데이터 파일 선택**")
-    st.caption("엑셀 파일을 올리면 해당 파일을 사용합니다. 미업로드 시 더미 데이터로 자동 실행됩니다.")
+    st.caption("엑셀 파일을 업로드하면 대시보드가 활성화됩니다.")
 
     file_ott = st.file_uploader(
         "📺 엑셀 A — OTT 시청 기록",
@@ -101,20 +63,20 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # 파일 로드 (업로드 우선, 없으면 더미)
+    # 파일 로드 (업로드된 파일만 사용)
     if file_ott is not None:
         df_ott = parse_ott(file_ott)
         ott_label = f"📺 엑셀 A ({file_ott.name})"
     else:
-        df_ott = dummy_ott()
-        ott_label = "📺 엑셀 A (더미 데이터)"
+        df_ott = pd.DataFrame()
+        ott_label = "📺 엑셀 A"
 
     if file_yt is not None:
         df_yt = parse_yt(file_yt)
         yt_label = f"▶ 엑셀 B ({file_yt.name})"
     else:
-        df_yt = dummy_yt()
-        yt_label = "▶ 엑셀 B (더미 데이터)"
+        df_yt = pd.DataFrame()
+        yt_label = "▶ 엑셀 B"
 
     # ② OTT 플랫폼 필터
     OTT_PLATFORMS = sorted(df_ott["플랫폼"].unique().tolist()) if not df_ott.empty else []
@@ -141,18 +103,32 @@ with st.sidebar:
     )
 
     st.markdown("---")
-    st.caption(f"현재 데이터: {ott_label}  |  {yt_label}")
+    if not df_ott.empty or not df_yt.empty:
+        st.caption(f"현재 데이터: {ott_label}  |  {yt_label}")
+
+# ─────────────────────────────────────────────
+# 제목
+# ─────────────────────────────────────────────
+st.title("🧠 나만의 도파민 추적기 (OTT & 유튜브 중독도 분석)")
+st.markdown("---")
+
+# 파일 미업로드 시 안내 메시지만 표시하고 종료
+if df_ott.empty and df_yt.empty:
+    st.info("👈 왼쪽 사이드바에서 엑셀 파일을 업로드하면 대시보드가 표시됩니다.")
+    st.stop()
 
 # ─────────────────────────────────────────────
 # 두 데이터프레임 병합 → 총 도파민 소비 데이터
 # ─────────────────────────────────────────────
-df_ott_merged = df_ott.rename(columns={"콘텐츠명": "콘텐츠/채널"}).copy()
-df_ott_merged["소스"] = ott_label
-df_ott_merged["영상종류"] = None
+df_ott_merged = df_ott.rename(columns={"콘텐츠명": "콘텐츠/채널"}).copy() if not df_ott.empty else pd.DataFrame(columns=["날짜","플랫폼","콘텐츠/채널","시청시간(분)","소스","영상종류"])
+if not df_ott.empty:
+    df_ott_merged["소스"] = ott_label
+    df_ott_merged["영상종류"] = None
 
-df_yt_merged = df_yt.rename(columns={"채널명": "콘텐츠/채널"}).copy()
-df_yt_merged["소스"] = yt_label
-df_yt_merged["플랫폼"] = "유튜브"   # 플랫폼 컬럼에 '유튜브'로 통일
+df_yt_merged = df_yt.rename(columns={"채널명": "콘텐츠/채널"}).copy() if not df_yt.empty else pd.DataFrame(columns=["날짜","영상종류","콘텐츠/채널","시청시간(분)","소스","플랫폼"])
+if not df_yt.empty:
+    df_yt_merged["소스"] = yt_label
+    df_yt_merged["플랫폼"] = "유튜브"
 
 df_all = pd.concat([df_ott_merged, df_yt_merged], ignore_index=True)
 df_all["날짜"] = pd.to_datetime(df_all["날짜"])
@@ -162,12 +138,6 @@ df_all = df_all.sort_values("날짜")
 ott_mask = (df_all["소스"] == ott_label) & (df_all["플랫폼"].isin(sel_platforms))
 yt_mask  = (df_all["소스"] == yt_label) & (df_all["영상종류"].isin(sel_yt_kinds))
 df_filtered = df_all[ott_mask | yt_mask].copy()
-
-# ─────────────────────────────────────────────
-# 제목
-# ─────────────────────────────────────────────
-st.title("🧠 나만의 도파민 추적기 (OTT & 유튜브 중독도 분석)")
-st.markdown("---")
 
 # ─────────────────────────────────────────────
 # 주요 지표 (st.metric)
